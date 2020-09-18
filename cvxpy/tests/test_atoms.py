@@ -82,10 +82,33 @@ class TestAtoms(BaseTest):
         self.assertEqual(cp.norm1(atom).curvature, s.CONVEX)
         self.assertEqual(cp.norm1(-atom).curvature, s.CONVEX)
 
+    def test_list_input(self):
+        """Test that list input is rejected.
+        """
+        with self.assertRaises(Exception) as cm:
+            cp.max([cp.Variable(), 1])
+        self.assertTrue(str(cm.exception) in (
+            "The input must be a single CVXPY Expression, not a list. "
+            "Combine Expressions using atoms such as bmat, hstack, and vstack."))
+
+        with self.assertRaises(Exception) as cm:
+            cp.norm([1, cp.Variable()])
+        self.assertTrue(str(cm.exception) in (
+            "The input must be a single CVXPY Expression, not a list. "
+            "Combine Expressions using atoms such as bmat, hstack, and vstack."))
+
+        x = cp.Variable()
+        y = cp.Variable()
+        with self.assertRaises(Exception) as cm:
+            cp.norm([x, y]) <= 1
+        self.assertTrue(str(cm.exception) in (
+            "The input must be a single CVXPY Expression, not a list. "
+            "Combine Expressions using atoms such as bmat, hstack, and vstack."))
+
     def test_quad_form(self):
         """Test quad_form atom.
         """
-        P = Parameter((2, 2))
+        P = Parameter((2, 2), symmetric=True)
         expr = cp.quad_form(self.x, P)
         assert not expr.is_dcp()
 
@@ -497,6 +520,27 @@ class TestAtoms(BaseTest):
         self.assertEqual(str(cm.exception),
                          "Invalid reshape dimensions (5, 4).")
 
+        # Test C-style reshape.
+        a = np.arange(10)
+        A_np = np.reshape(a, (5, 2), order='C')
+        A_cp = cp.reshape(a, (5, 2), order='C')
+        self.assertItemsAlmostEqual(A_np, A_cp.value)
+
+        X = cp.Variable((5, 2))
+        prob = cp.Problem(cp.Minimize(0), [X == A_cp])
+        prob.solve()
+        self.assertItemsAlmostEqual(A_np, X.value)
+
+        a_np = np.reshape(A_np, 10, order='C')
+        a_cp = cp.reshape(A_cp, 10, order='C')
+
+        self.assertItemsAlmostEqual(a_np, a_cp.value)
+
+        x = cp.Variable(10)
+        prob = cp.Problem(cp.Minimize(0), [x == a_cp])
+        prob.solve()
+        self.assertItemsAlmostEqual(a_np, x.value)
+
     def test_vec(self):
         """Test the vec atom.
         """
@@ -861,13 +905,13 @@ class TestAtoms(BaseTest):
         # Solve the (simple) two-stage problem by "combining" the two stages
         # (i.e., by solving a single linear program)
         p1 = Problem(Minimize(x+y), [x+y >= 3, y >= 4, x >= 5])
-        p1.solve()
+        p1.solve(solver=cp.ECOS_BB)
 
         # Solve the two-stage problem via partial_optimize
         p2 = Problem(Minimize(y), [x+y >= 3, y >= 4])
         g = partial_optimize(p2, [y], [x])
         p3 = Problem(Minimize(x+g), [x >= 5])
-        p3.solve()
+        p3.solve(solver=cp.ECOS_BB)
         self.assertAlmostEqual(p1.value, p3.value)
 
     def test_partial_optimize_special_constr(self):

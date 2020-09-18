@@ -1,7 +1,7 @@
 .. _dqcp:
 
 Disciplined Quasiconvex Programming
-=================================
+===================================
 
 Disciplined quasiconvex programming (DQCP) is a generalization of DCP for
 quasiconvex functions. Quasiconvexity generalizes convexity: a function
@@ -182,7 +182,7 @@ The only valid constraints under the DQCP rules are
 -  affine == affine
 -  convex <= concave
 -  concave >= convex
--  qausiconvex <= constant
+-  quasiconvex <= constant
 -  quasiconcave >= constant
 
 You can check that a problem, constraint, or objective satisfies the DQCP

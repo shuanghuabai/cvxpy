@@ -190,6 +190,24 @@ class TestProblem(BaseTest):
         self.assertGreater(stats.solve_time, 0)
         self.assertGreater(stats.setup_time, 0)
         self.assertGreater(stats.num_iters, 0)
+        self.assertIn('info', stats.extra_stats)
+
+        prob = Problem(cp.Minimize(cp.norm(self.x)), [self.x == 0])
+        prob.solve(solver=s.SCS)
+        stats = prob.solver_stats
+        self.assertGreater(stats.solve_time, 0)
+        self.assertGreater(stats.setup_time, 0)
+        self.assertGreater(stats.num_iters, 0)
+        self.assertIn('info', stats.extra_stats)
+
+        prob = Problem(cp.Minimize(cp.sum(self.x)), [self.x == 0])
+        prob.solve(solver=s.OSQP)
+        stats = prob.solver_stats
+        self.assertGreater(stats.solve_time, 0)
+        # We do not populate setup_time for OSQP (OSQP decomposes time
+        # into setup, solve, and polish; these are summed to obtain solve_time)
+        self.assertGreater(stats.num_iters, 0)
+        self.assertTrue(hasattr(stats.extra_stats, 'info'))
 
     def test_get_problem_data(self):
         """Test get_problem_data method.
@@ -253,8 +271,7 @@ class TestProblem(BaseTest):
             for verbose in [True, False]:
                 # Don't test GLPK because there's a race
                 # condition in setting CVXOPT solver options.
-                # SuperSCS doesn't write to the stdout seen by Python.
-                if solver in [cp.GLPK, cp.GLPK_MI, cp.MOSEK, cp.SUPER_SCS, cp.CBC]:
+                if solver in [cp.GLPK, cp.GLPK_MI, cp.MOSEK, cp.CBC]:
                     continue
                 sys.stdout = StringIO()  # capture output
 
@@ -1847,3 +1864,39 @@ class TestProblem(BaseTest):
         problem = cp.Problem(objective, constraints)
         solution2 = problem.solve()
         self.assertAlmostEqual(solution1, solution2)
+
+    def test_rmul_scalar_mats(self):
+        """Test that rmul works with 1x1 matrices.
+        """
+        x = [[4144.30127531]]
+        y = [[7202.52114311]]
+        z = cp.Variable(shape=(1, 1))
+        objective = cp.Minimize(cp.quad_form(z, x) - 2 * z.T @ y)
+
+        prob = cp.Problem(objective)
+        prob.solve('OSQP', verbose=True)
+        result1 = prob.value
+
+        x = 4144.30127531
+        y = 7202.52114311
+        z = cp.Variable()
+        objective = cp.Minimize(x*z**2 - 2 * z * y)
+
+        prob = cp.Problem(objective)
+        prob.solve('OSQP', verbose=True)
+        self.assertAlmostEqual(prob.value, result1)
+
+    def test_min_with_axis(self):
+        """Test reshape of a min with axis=0.
+        """
+        x = cp.Variable((5, 2))
+        y = cp.Variable((5, 2))
+
+        stacked_flattened = cp.vstack([cp.vec(x), cp.vec(y)])  # (2, 10)
+        minimum = cp.min(stacked_flattened, axis=0)  # (10,)
+        reshaped_minimum = cp.reshape(minimum, (5, 2))  # (5, 2)
+
+        obj = cp.sum(reshaped_minimum)
+        problem = cp.Problem(cp.Maximize(obj), [x == 1, y == 2])
+        result = problem.solve()
+        self.assertAlmostEqual(result, 10)

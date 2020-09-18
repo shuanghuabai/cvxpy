@@ -114,11 +114,9 @@ class TestNonOptimal(BaseTest):
         """
         P = np.array([[2, 2], [3, 4]])
         x = cvxpy.Variable(2)
-        cost = cvxpy.quad_form(x, P)
-        prob = cvxpy.Problem(cvxpy.Minimize(cost), [x == [1, 2]])
         with self.assertRaises(Exception) as cm:
-            prob.solve()
-        self.assertTrue("Problem does not follow DCP rules."
+            cvxpy.quad_form(x, P)
+        self.assertTrue("P must be symmetric/Hermitian."
                         in str(cm.exception))
 
     def test_non_psd(self):
@@ -145,8 +143,8 @@ class TestNonOptimal(BaseTest):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             cost = cvxpy.quad_form(x, P)
-        prob = cvxpy.Problem(cvxpy.Minimize(cost), [x == [1, 2]])
-        prob.solve()
+            prob = cvxpy.Problem(cvxpy.Minimize(cost), [x == [1, 2]])
+            prob.solve()
 
     def test_nsd_exactly_tolerance(self):
         """Test that NSD check when eigenvalue is exactly EIGVAL_TOL
@@ -157,8 +155,8 @@ class TestNonOptimal(BaseTest):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             cost = cvxpy.quad_form(x, P)
-        prob = cvxpy.Problem(cvxpy.Maximize(cost), [x == [1, 2]])
-        prob.solve()
+            prob = cvxpy.Problem(cvxpy.Maximize(cost), [x == [1, 2]])
+            prob.solve()
 
     def test_obj_eval(self):
         """Test case where objective evaluation differs from result.

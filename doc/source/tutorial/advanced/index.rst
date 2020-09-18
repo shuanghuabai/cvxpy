@@ -206,7 +206,7 @@ You can construct mixed-integer programs by creating variables with the attribut
 CVXPY provides interfaces to many mixed-integer solvers, including open source and commercial solvers.
 For licencing reasons, CVXPY does not install any of these solvers by default.
 
-CVXPY supports open source mixed-integer solvers GLPK_MI_ and CBC_. The CVXOPT_ python package
+CVXPY supports open source mixed-integer solvers GLPK_MI_, CBC_ and SCIP_. The CVXOPT_ python package
 provides CVXPY with access to GLPK_MI; CVXOPT can be installed by running ``pip install cvxopt`` in
 your command line or terminal. Neither GLPK_MI nor CBC allow nonlinear models.
 
@@ -277,7 +277,7 @@ constraints hold and :math:`\infty` when they are violated.
 
    x = cp.Variable()
    constraints = [0 <= x, x <= 1]
-   expr = cp.indicator(constraints)
+   expr = cp.transforms.indicator(constraints)
    x.value = .5
    print("expr.value = ", expr.value)
    x.value = 2
@@ -430,6 +430,10 @@ The table below shows the types of problems the supported solvers can handle.
 +--------------+----+----+------+-----+-----+-----+
 | `SCS`_       | X  | X  | X    | X   | X   |     |
 +--------------+----+----+------+-----+-----+-----+
+| `SCIP`_      | X  | X  | X    |     |     | X   |
++--------------+----+----+------+-----+-----+-----+
+| `XPRESS`_    | X  | X  | X    |     |     | X   |
++--------------+----+----+------+-----+-----+-----+
 
 (*) Except mixed-integer SDP.
 
@@ -496,6 +500,15 @@ You can change the solver called by CVXPY using the ``solver`` keyword argument.
     # Solve with NAG.
     prob.solve(solver=cp.NAG)
     print "optimal value with NAG:", prob.value
+
+    # Solve with SCIP.
+    prob.solve(solver=cp.SCIP)
+    print "optimal value with SCIP:", prob.value
+
+    # Solve with XPRESS
+    prob.solve(solver=cp.XPRESS)
+    print "optimal value with XPRESS:", prob.value
+
 ::
 
     optimal value with OSQP: 6.0
@@ -509,6 +522,8 @@ You can change the solver called by CVXPY using the ``solver`` keyword argument.
     optimal value with CBC: 6.0
     optimal value with CPLEX: 6.0
     optimal value with NAG: 6.000000003182365
+    optimal value with SCIP: 6.0
+    optimal value with XPRESS: 6.0
 
 Use the ``installed_solvers`` utility function to get a list of the solvers your installation of CVXPY supports.
 
@@ -518,7 +533,7 @@ Use the ``installed_solvers`` utility function to get a list of the solvers your
 
 ::
 
-    ['CBC', 'CVXOPT', 'MOSEK', 'GLPK', 'GLPK_MI', 'ECOS', 'SCS', 'GUROBI', 'OSQP', 'CPLEX', 'NAG']
+    ['CBC', 'CVXOPT', 'MOSEK', 'GLPK', 'GLPK_MI', 'ECOS', 'SCS', 'GUROBI', 'OSQP', 'CPLEX', 'NAG', 'SCIP', 'XPRESS']
 
 Viewing solver output
 ^^^^^^^^^^^^^^^^^^^^^
@@ -729,9 +744,23 @@ For others see `OSQP documentation <http://osqp.org/docs/interfaces/solver_setti
     number of iterative refinement steps after solving KKT system (default: 1).
 
 ``'kktsolver'``
-    The KKT solver used. The default, "chol", does a Cholesky factorization with preprocessing to make A and [A; G] full rank.
-    The "robust" solver does an LDL factorization without preprocessing.
-    It is slower, but more robust.
+    Controls the method used to solve systems of linear equations at each step of CVXOPT's
+    interior-point algorithm. This parameter can be a string (with one of several values),
+    or a function handle.
+
+    KKT solvers built-in to CVXOPT can be specified by strings  'ldl', 'ldl2', 'qr', 'chol',
+    and 'chol2'. If 'chol' is chosen, then CVXPY will perform an additional presolve
+    procedure to eliminate redundant constraints. You can also set ``kktsolver='robust'``.
+    The 'robust' solver is implemented in python, and is part of CVXPY source code; the
+    'robust' solver doesn't require a presolve phase to eliminate redundant constraints,
+    however it can be slower than 'chol'.
+
+    Finally, there is an option to pass a function handle for the ``kktsolver`` argument.
+    Passing a KKT solver based on a function handle allows you to take complete control of
+    solving the linear systems encountered in CVXOPT's interior-point algorithm. The API for
+    KKT solvers of this form is a small wrapper around CVXOPT's API for function-handle KKT
+    solvers. The precise API that CVXPY users are held to is described in the CVXPY source
+    code: cvxpy/reductions/solvers/kktsolver.py
 
 `SCS`_ options:
 
@@ -803,6 +832,9 @@ The following cut-generators are available:
 
 ``'nag_params'``
     a dictionary of NAG option parameters. Refer to NAG's Python or Fortran API for details. For example, to set the maximum number of iterations for a linear programming problem to 20, use "LPIPM Iteration Limit" for the key name and 20 for its value . 
+
+SCIP_ options:
+``'scip_params'`` a dictionary of SCIP optional parameters, a full list of parameters with defaults is listed `here <https://www.scipopt.org/doc-5.0.1/html/PARAMETERS.php>`_.
 
 Getting the standard form
 -------------------------
@@ -881,7 +913,7 @@ The full set of reductions available is discussed in :ref:`reductions-api`.
 
 Disciplined Parametrized Programming
 ------------------------------------
-*Note: DPP requires CVXPY >= 1.1.0a0.*
+*Note: DPP requires CVXPY version 1.1.0 or greater.*
 
 :py:class:`Parameters <cvxpy.expressions.constants.parameter.Parameter>` are
 symbolic representations of constants. Using parameters lets you modify the
@@ -903,9 +935,6 @@ is solved, CVXPY compiles it and caches the mapping from parameters to problem
 data. As a result, subsequent rewritings of DPP problems can be substantially
 faster. CVXPY allows you to solve parametrized problems that are not DPP, but
 you won't see a speed-up when doing so.
-
-Currently, only problems that are solved by conic solvers (such as ECOS, SCS,
-and MOSEK), will see a speed-up with DPP.
 
 The DPP ruleset
 ^^^^^^^^^^^^^^^
@@ -1103,8 +1132,7 @@ you could rewrite the above program as the following DPP-complaint program
 Repeatedly solving a DPP problem
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The following example demonstrates how parameters can speed-up repeated
-solves of a DPP-compliant DCP problem. (Similar speed-ups can be obtained for
-DGP problems.)
+solves of a DPP-compliant DCP problem.
 
 .. code:: python3
 
@@ -1133,12 +1161,12 @@ DGP problems.)
     for val in gamma_vals:
         gamma.value = val
         start = time.time()
-        problem.solve(cp.SCS)
+        problem.solve()
         end = time.time()
         times.append(end - start)
         new_problem = cp.Problem(obj)
         start = time.time()
-        new_problem.solve(cp.SCS)
+        new_problem.solve()
         end = time.time()
         new_problem_times.append(end - start)
 
@@ -1153,11 +1181,14 @@ DGP problems.)
 
 .. image:: advanced_files/resolving_dpp.png
 
+Similar speed-ups can be obtained for DGP problems.
+
 .. _derivatives:
+
 
 Sensitivity analysis and gradients
 ------------------------------------
-*Note: This feature requires CVXPY >= 1.1.0a0.*
+*Note: This feature requires CVXPY version 1.1.0 or greater.*
 
 An optimization problem can be viewed as a function mapping parameters
 to solutions. This solution map is sometimes differentiable. CVXPY
@@ -1293,10 +1324,11 @@ on derivatives.
 .. _GLPK_MI: https://www.gnu.org/software/glpk/
 .. _GUROBI: http://www.gurobi.com/
 .. _MOSEK: https://www.mosek.com/
-.. _XPRESS: https://www.fico.com/en/products/fico-xpress-solver
 .. _CBC: https://projects.coin-or.org/Cbc
 .. _CGL: https://projects.coin-or.org/Cgl
 .. _CPLEX: https://www-01.ibm.com/software/commerce/optimization/cplex-optimizer/
 .. _NAG: https://www.nag.co.uk/nag-library-python/
 .. _OSQP: https://osqp.org/
+.. _SCIP: https://scip.zib.de/
+.. _XPRESS: https://www.fico.com/en/products/fico-xpress-optimization
 

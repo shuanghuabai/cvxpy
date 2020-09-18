@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import cvxpy.settings as s
+from cvxpy import settings as s
 from cvxpy import error
 from cvxpy.problems.objective import Minimize, Maximize
 from cvxpy.reductions.chain import Chain
@@ -28,12 +28,13 @@ from cvxpy.reductions.solvers import bisection
 from cvxpy.reductions.solvers import defines as slv_def
 from cvxpy.utilities.deterministic import unique_list
 import cvxpy.utilities.performance_utils as perf
-from cvxpy.constraints import Equality, Inequality, NonPos, Zero
+from cvxpy.constraints import Equality, Inequality, NonPos, Zero, NonNeg
 import cvxpy.utilities as u
 
 from collections import namedtuple
 import numpy as np
 import time
+import warnings
 
 
 SolveResult = namedtuple(
@@ -580,8 +581,11 @@ class Problem(u.Canonical):
         else:
             candidates['qp_solvers'] = [s for s in slv_def.INSTALLED_SOLVERS
                                         if s in slv_def.QP_SOLVERS]
-            candidates['conic_solvers'] = [s for s in slv_def.INSTALLED_SOLVERS
-                                           if s in slv_def.CONIC_SOLVERS]
+            candidates['conic_solvers'] = []
+            # ECOS_BB can only be called explicitly.
+            for slv in slv_def.INSTALLED_SOLVERS:
+                if slv in slv_def.CONIC_SOLVERS and slv != s.ECOS_BB:
+                    candidates['conic_solvers'].append(slv)
 
         # If gp we must have only conic solvers
         if gp:
@@ -595,7 +599,8 @@ class Problem(u.Canonical):
                 candidates['qp_solvers'] = []  # No QP solvers allowed
 
         if self.is_mixed_integer():
-            if len(slv_def.INSTALLED_MI_SOLVERS) == 0:
+            # ECOS_BB must be called explicitly.
+            if len(slv_def.INSTALLED_MI_SOLVERS) == 1 and solver != s.ECOS_BB:
                 msg = """
 
                     CVXPY needs additional software (a `mixed-integer solver`) to handle this model.
@@ -618,7 +623,8 @@ class Problem(u.Canonical):
                 raise error.SolverError(
                     "Problem is mixed-integer, but candidate "
                     "QP/Conic solvers (%s) are not MIP-capable." %
-                    [candidates['qp_solvers'], candidates['conic_solvers']])
+                    (candidates['qp_solvers'] +
+                     candidates['conic_solvers']))
 
         return candidates
 
@@ -913,8 +919,8 @@ class Problem(u.Canonical):
             p.value = 3.0
             problem.solve(requires_grad=True, eps=1e-10)
             # derivative() populates the delta attribute of the variables
-            problem.derivative()
             p.delta = 1e-3
+            problem.derivative()
             # Because x* = 2 * p, dx*/dp = 2, so (dx*/dp)(p.delta) == 2e-3
             np.testing.assert_allclose(x.delta, 2e-3)
 
@@ -1048,6 +1054,12 @@ class Problem(u.Canonical):
         """
 
         solution = chain.invert(solution, inverse_data)
+        if solution.status in s.INACCURATE:
+            warnings.warn(
+                "Solution may be inaccurate. Try another solver, "
+                "adjusting the solver settings, or solve with "
+                "verbose=True for more information."
+            )
         if solution.status in s.ERROR:
             raise error.SolverError(
                     "Solver '%s' failed. " % chain.solver.name() +
@@ -1126,18 +1138,25 @@ class SolverStats(object):
 
     Attributes
     ----------
+    solver_name : str
+        The name of the solver.
     solve_time : double
         The time (in seconds) it took for the solver to solve the problem.
     setup_time : double
         The time (in seconds) it took for the solver to setup the problem.
     num_iters : int
         The number of iterations the solver had to go through to find a solution.
+    extra_stats : object
+        Extra statistics specific to the solver; these statistics are typically
+        returned directly from the solver, without modification by CVXPY.
+        This object may be a dict, or a custom Python object.
     """
     def __init__(self, results_dict, solver_name):
         self.solver_name = solver_name
         self.solve_time = None
         self.setup_time = None
         self.num_iters = None
+        self.extra_stats = None
 
         if s.SOLVE_TIME in results_dict:
             self.solve_time = results_dict[s.SOLVE_TIME]
@@ -1145,6 +1164,8 @@ class SolverStats(object):
             self.setup_time = results_dict[s.SETUP_TIME]
         if s.NUM_ITERS in results_dict:
             self.num_iters = results_dict[s.NUM_ITERS]
+        if s.EXTRA_STATS in results_dict:
+            self.extra_stats = results_dict[s.EXTRA_STATS]
 
 
 class SizeMetrics(object):
@@ -1208,5 +1229,5 @@ class SizeMetrics(object):
         # num_scalar_leq_constr
         self.num_scalar_leq_constr = 0
         for constraint in problem.constraints:
-            if isinstance(constraint, (Inequality, NonPos)):
+            if isinstance(constraint, (Inequality, NonPos, NonNeg)):
                 self.num_scalar_leq_constr += constraint.expr.size
